@@ -1,0 +1,219 @@
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.datasets import make_blobs
+import numpy as np
+from sklearn.manifold import TSNE
+from sklearn.metrics import silhouette_score, calinski_harabasz_score
+import time
+
+# محاولة استيراد TSNE-PSO إذا كان مثبتاً
+try:
+    from tsne_pso import TSNEPSO
+    TSNEPSO_AVAILABLE = True
+    print("✅ TSNE-PSO متاح للاستخدام")
+except ImportError:
+    TSNEPSO_AVAILABLE = False
+    print("⚠️ TSNE-PSO غير مثبت، سيتم استخدام TSNE العادي")
+
+class AlternativeTSNEPSO:
+    """بديل مبسط عندما لا يكون TSNE-PSO متاحاً"""
+    def __init__(self, n_components=2, n_particles=10, perplexity=30, n_iter=1000, random_state=42):
+        self.n_components = n_components
+        self.n_particles = n_particles
+        self.perplexity = perplexity
+        self.n_iter = n_iter
+        self.random_state = random_state
+        self.tsne = TSNE(
+            n_components=n_components,
+            perplexity=perplexity,
+            n_iter=n_iter,
+            random_state=random_state
+        )
+    
+    def fit_transform(self, X):
+        self.embedding_ = self.tsne.fit_transform(X)
+        self.kl_divergence_ = getattr(self.tsne, 'kl_divergence_', 0.0)
+        self.n_iter_ = self.n_iter
+        return self.embedding_
+
+def generate_comprehensive_results():
+    """توليد تقرير شامل لنتائج TSNE"""
+    
+    # 1. إنشاء بيانات اختبار متنوعة
+    datasets = {
+        "Blobs_Simple": make_blobs(n_samples=300, centers=3, n_features=10, random_state=42),
+        "Blobs_Complex": make_blobs(n_samples=500, centers=5, n_features=15, random_state=42)
+    }
+    
+    results = []
+    
+    for name, (X, y) in datasets.items():
+        print(f"🔬 معالجة {name}...")
+        
+        # 2. تطبيق TSNE بمعلمات مختلفة
+        configs = [
+            {"perplexity": 5, "learning_rate": 200},
+            {"perplexity": 30, "learning_rate": 500},
+            {"perplexity": 50, "learning_rate": 1000}
+        ]
+        
+        for config in configs:
+            try:
+                # استخدام TSNE-PSO إذا كان متاحاً، وإلا استخدام TSNE العادي
+                if TSNEPSO_AVAILABLE:
+                    model = TSNEPSO(
+                        n_components=2,
+                        n_particles=10,
+                        perplexity=config["perplexity"],
+                        n_iter=250,
+                        random_state=42,
+                        verbose=0
+                    )
+                else:
+                    model = TSNE(
+                        n_components=2,
+                        perplexity=config["perplexity"],
+                        learning_rate=config["learning_rate"],
+                        n_iter=250,
+                        random_state=42
+                    )
+                
+                # قياس وقت التنفيذ
+                start_time = time.time()
+                embedding = model.fit_transform(X)
+                execution_time = time.time() - start_time
+                
+                # حساب مقاييس الجودة
+                sil_score = silhouette_score(embedding, y) if len(np.unique(y)) > 1 else 0
+                ch_score = calinski_harabasz_score(embedding, y) if len(np.unique(y)) > 1 else 0
+                
+                # الحصول على KL divergence إن أمكن
+                kl_divergence = getattr(model, 'kl_divergence_', 0.0)
+                
+                # حفظ النتائج
+                results.append({
+                    'Dataset': name,
+                    'Algorithm': 'TSNE-PSO' if TSNEPSO_AVAILABLE else 'TSNE-Standard',
+                    'perplexity': config["perplexity"],
+                    'learning_rate': config["learning_rate"],
+                    'KL_Divergence': kl_divergence,
+                    'Silhouette_Score': sil_score,
+                    'Calinski_Harabasz_Score': ch_score,
+                    'Execution_Time_Seconds': execution_time,
+                    'n_iter': getattr(model, 'n_iter_', 250)
+                })
+                
+                print(f"  ✅ نجح مع perplexity={config['perplexity']}")
+                
+            except Exception as e:
+                print(f"  ⚠️ خطأ في {name} مع {config}: {e}")
+                continue
+    
+    return pd.DataFrame(results)
+
+# 3. تشغيل وتوليد التقرير
+print("🚀 بدء توليد التقرير الشامل...")
+results_df = generate_comprehensive_results()
+
+# عرض النتائج
+print("\n📊 النتائج المجمعة:")
+print("="*80)
+if not results_df.empty:
+    print(results_df.to_string(index=False))
+else:
+    print("❌ لا توجد نتائج لعرضها - جميع المحاولات فشلت")
+
+# 4. حفظ النتائج في ملف
+if not results_df.empty:
+    results_df.to_csv('tsne_pso_results.csv', index=False)
+    print("💾 تم حفظ النتائج في 'tsne_pso_results.csv'")
+else:
+    print("❌ لم يتم حفظ أي نتائج بسبب عدم وجود بيانات")
+
+# 5. إنشاء رسوم بيانية إذا كانت هناك بيانات
+def create_visualizations(results_df):
+    """إنشاء رسوم بيانية للنتائج"""
+    if results_df.empty:
+        print("❌ لا توجد بيانات لإنشاء الرسوم البيانية")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    
+    try:
+        # الرسم 1: مقارنة scores حسب perplexity
+        sns.boxplot(data=results_df, x='perplexity', y='Silhouette_Score', ax=axes[0,0])
+        axes[0,0].set_title('جودة التجميع حسب Perplexity')
+        axes[0,0].set_xlabel('Perplexity')
+        axes[0,0].set_ylabel('Silhouette Score')
+        
+        # الرسم 2: وقت التنفيذ حسب perplexity
+        sns.boxplot(data=results_df, x='perplexity', y='Execution_Time_Seconds', ax=axes[0,1])
+        axes[0,1].set_title('وقت التنفيذ حسب Perplexity')
+        axes[0,1].set_xlabel('Perplexity')
+        axes[0,1].set_ylabel('الوقت (ثانية)')
+        
+        # الرسم 3: تأثير perplexity على KL Divergence
+        if 'KL_Divergence' in results_df and results_df['KL_Divergence'].notna().any():
+            scatter_data = results_df[results_df['KL_Divergence'] > 0]
+            if not scatter_data.empty:
+                sns.scatterplot(data=scatter_data, x='perplexity', y='KL_Divergence', 
+                                size='Silhouette_Score', hue='Dataset', ax=axes[1,0])
+                axes[1,0].set_title('تأثير Perplexity على KL Divergence')
+                axes[1,0].set_xlabel('Perplexity')
+                axes[1,0].set_ylabel('KL Divergence')
+        
+        # الرسم 4: مقارنة بين datasets
+        sns.barplot(data=results_df, x='Dataset', y='Silhouette_Score', ax=axes[1,1])
+        axes[1,1].set_title('مقارنة الأداء بين مجموعات البيانات')
+        axes[1,1].set_xlabel('مجموعة البيانات')
+        axes[1,1].set_ylabel('Silhouette Score')
+        
+        plt.tight_layout()
+        plt.savefig('tsne_analysis.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        print("✅ تم إنشاء الرسوم البيانية بنجاح")
+        
+    except Exception as e:
+        print(f"❌ خطأ في إنشاء الرسوم البيانية: {e}")
+
+create_visualizations(results_df)
+
+# 6. إنشاء تقرير نصي
+def generate_text_report():
+    """توليد تقرير نصي مفصل"""
+    if results_df.empty:
+        return "❌ لا توجد بيانات لتوليد التقرير"
+    
+    report = f"""
+📊 تقرير أداء خوارزمية {'TSNE-PSO' if TSNEPSO_AVAILABLE else 'TSNE القياسي'}
+
+📈 الإحصائيات العامة:
+• عدد التجارب الناجحة: {len(results_df)}
+• أفضل درجة Silhouette: {results_df['Silhouette_Score'].max():.4f}
+• متوسط وقت التنفيذ: {results_df['Execution_Time_Seconds'].mean():.2f} ثانية
+
+⚙️ أفضل الإعدادات:
+"""
+    
+    if not results_df.empty:
+        best_row = results_df.loc[results_df['Silhouette_Score'].idxmax()]
+        report += f"""• أفضل Perplexity: {best_row['perplexity']}
+• أفضل Learning Rate: {best_row['learning_rate']}
+• أفضل درجة Silhouette: {best_row['Silhouette_Score']:.4f}
+"""
+    
+    report += f"""
+📋 ملاحظات:
+• الخوارزمية المستخدمة: {'TSNE-PSO' if TSNEPSO_AVAILABLE else 'TSNE القياسي من scikit-learn'}
+• تم اختبار {len(results_df)} تكوين مختلف
+• جميع الاختبارات على بيانات اصطناعية (Blobs)
+"""
+    
+    return report
+
+print("\n" + "="*80)
+print("📄 التقرير النهائي:")
+print("="*80)
+print(generate_text_report())
